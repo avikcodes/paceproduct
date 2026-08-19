@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "WorkspaceMember" ADD COLUMN     "billingRate" DECIMAL(12,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "costRate" DECIMAL(12,2) NOT NULL DEFAULT 0,
+ADD COLUMN     "currency" TEXT NOT NULL DEFAULT 'USD';

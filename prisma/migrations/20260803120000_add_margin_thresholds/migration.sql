@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Client" ADD COLUMN "healthyThreshold" DECIMAL(12,2) NOT NULL DEFAULT 20,
+ADD COLUMN "warningThreshold" DECIMAL(12,2) NOT NULL DEFAULT 10,
+ADD COLUMN "criticalThreshold" DECIMAL(12,2) NOT NULL DEFAULT 0;

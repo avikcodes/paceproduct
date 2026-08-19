@@ -1,0 +1,348 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+}
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum TimeEntrySource {
+  MANUAL
+  CSV
+  TOGGL
+  HARVEST
+}
+
+enum TogglSyncStatus {
+  NEVER
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum HarvestSyncStatus {
+  NEVER
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum AlertType {
+  MARGIN
+  BUDGET
+  SCOPE
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model User {
+  id                 String                @id
+  activeWorkspace    Workspace?            @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  activeWorkspaceId  String?
+  memberships        WorkspaceMember[]
+  invitedInvitations WorkspaceInvitation[] @relation("InvitationInvitedBy")
+  acceptedInvitations WorkspaceInvitation[] @relation("InvitationAcceptedBy")
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([activeWorkspaceId])
+}
+
+model Workspace {
+  id                String                @id @default(cuid())
+  name              String
+  members           WorkspaceMember[]
+  invitations       WorkspaceInvitation[]
+  activeUsers       User[]
+  clients           Client[]
+  timeEntries       TimeEntry[]
+  reports           Report[]
+  togglConnection   TogglConnection?
+  togglImports      TogglImport[]
+  harvestConnection HarvestConnection?
+  harvestImports    HarvestImport[]
+  alerts            Alert[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+}
+
+model WorkspaceInvitation {
+  id              String            @id @default(cuid())
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId     String
+  email           String?
+  role            Role              @default(MEMBER)
+  status          InvitationStatus  @default(PENDING)
+  tokenHash       String?           @unique
+  expiresAt       DateTime?
+  invitedByUser   User?             @relation("InvitationInvitedBy", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+  invitedByUserId String?
+  acceptedByUser  User?             @relation("InvitationAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  acceptedByUserId String?
+  acceptedAt      DateTime?
+  acceptedEmail   String?
+  cancelledAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([workspaceId, email])
+  @@index([email])
+  @@index([status])
+}
+
+model WorkspaceMember {
+  id          String      @id @default(cuid())
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  role        Role        @default(MEMBER)
+  billingRate Decimal     @default(0) @db.Decimal(12, 2)
+  costRate    Decimal     @default(0) @db.Decimal(12, 2)
+  currency    String      @default("USD")
+  createdAt   DateTime    @default(now())
+  timeEntries TimeEntry[]
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Client {
+  id                String       @id @default(cuid())
+  workspace         Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId       String
+  name              String
+  company           String?
+  website           String?
+  contactName       String?
+  contactEmail      String?
+  phone             String?
+  status            ClientStatus @default(ACTIVE)
+  notes             String?
+  healthyThreshold  Decimal      @default(20) @db.Decimal(12, 2)
+  warningThreshold  Decimal      @default(10) @db.Decimal(12, 2)
+  criticalThreshold Decimal      @default(0) @db.Decimal(12, 2)
+  retainers         Retainer[]
+  timeEntries       TimeEntry[]
+  alerts            Alert[]
+  reports           Report[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([workspaceId, status])
+}
+
+model Alert {
+  id             String        @id @default(cuid())
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  client         Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId       String
+  type           AlertType
+  severity       AlertSeverity
+  title          String
+  description    String
+  isRead         Boolean       @default(false)
+  isResolved     Boolean       @default(false)
+  resolvedAt     DateTime?
+  scopeThreshold Int?
+  createdAt      DateTime      @default(now())
+
+  @@index([workspaceId])
+  @@index([clientId])
+  @@index([workspaceId, isRead])
+  @@index([workspaceId, isResolved])
+  @@index([workspaceId, type])
+  @@index([workspaceId, severity])
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, clientId, type])
+}
+
+model Report {
+  id                String        @id @default(cuid())
+  workspace         Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId       String
+  client            Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId          String
+  reportMonth       DateTime
+  version           Int           @default(1)
+  revenue           Decimal       @db.Decimal(12, 2)
+  cost              Decimal       @db.Decimal(12, 2)
+  profit            Decimal       @db.Decimal(12, 2)
+  marginPercent     Decimal       @db.Decimal(12, 2)
+  currency          String        @default("USD")
+  hours             Decimal?      @db.Decimal(12, 2)
+  monthlyBudget     Decimal?      @db.Decimal(12, 2)
+  scopeHours        Int?
+  billingCycle      BillingCycle?
+  retainerStartDate DateTime?
+  retainerEndDate   DateTime?
+  trendJson         Json?
+  generatedAt       DateTime      @default(now())
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([workspaceId, clientId, reportMonth, version])
+  @@index([workspaceId])
+  @@index([workspaceId, generatedAt])
+  @@index([workspaceId, reportMonth])
+}
+
+model Retainer {
+  id            String       @id @default(cuid())
+  client        Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId      String
+  monthlyBudget Decimal      @default(0) @db.Decimal(12, 2)
+  currency      String       @default("USD")
+  billingCycle  BillingCycle @default(MONTHLY)
+  scopeHours    Int          @default(0)
+  startDate     DateTime
+  endDate       DateTime?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([clientId])
+  @@index([clientId, isActive])
+}
+
+model TimeEntry {
+  id             String          @id @default(cuid())
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId       String
+  member         WorkspaceMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId       String
+  task           String
+  hours          Decimal         @db.Decimal(12, 2)
+  workDate       DateTime
+  source         TimeEntrySource @default(MANUAL)
+  togglEntryId   String?
+  harvestEntryId String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([workspaceId, togglEntryId])
+  @@unique([workspaceId, harvestEntryId])
+  @@index([workspaceId])
+  @@index([clientId])
+  @@index([memberId])
+  @@index([workspaceId, workDate])
+}
+
+model TogglConnection {
+  id                 String          @id @default(cuid())
+  workspace          Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId        String          @unique
+  apiTokenEncrypted  String
+  apiTokenIv         String
+  togglEmail         String?
+  togglName          String?
+  togglWorkspaceId   Int?
+  togglWorkspaceName String?
+  lastSyncAt         DateTime?
+  lastSyncStatus     TogglSyncStatus @default(NEVER)
+  lastSyncError      String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  imports            TogglImport[]
+}
+
+model TogglImport {
+  id            String           @id @default(cuid())
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  connection    TogglConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  connectionId  String?
+  status        TogglSyncStatus  @default(SUCCESS)
+  startDate     DateTime?
+  endDate       DateTime?
+  importedCount Int              @default(0)
+  skippedCount  Int              @default(0)
+  failedCount   Int              @default(0)
+  error         String?
+  startedAt     DateTime         @default(now())
+  finishedAt    DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+}
+
+model HarvestConnection {
+  id             String            @id @default(cuid())
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId    String            @unique
+  tokenEncrypted String
+  tokenIv        String
+  accountId      String
+  harvestUserId  Int?
+  harvestName    String?
+  harvestEmail   String?
+  harvestCompany String?
+  lastSyncAt     DateTime?
+  lastSyncStatus HarvestSyncStatus @default(NEVER)
+  lastSyncError  String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  imports        HarvestImport[]
+}
+
+model HarvestImport {
+  id            String             @id @default(cuid())
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  connection    HarvestConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  connectionId  String?
+  status        HarvestSyncStatus  @default(SUCCESS)
+  startDate     DateTime?
+  endDate       DateTime?
+  importedCount Int                @default(0)
+  skippedCount  Int                @default(0)
+  failedCount   Int                @default(0)
+  error         String?
+  startedAt     DateTime           @default(now())
+  finishedAt    DateTime?
+  createdAt     DateTime           @default(now())
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+}

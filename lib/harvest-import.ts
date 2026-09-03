@@ -1,6 +1,5 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { getClerkUserInfos } from "@/lib/clerk-users";
 import { normalizeHeader } from "@/lib/csv-core";
 import type { ClientOption, MemberOption } from "@/lib/time";
 import {
@@ -56,17 +55,12 @@ export async function loadHarvestRefs(
     }),
   ]);
 
-  const userInfos = await getClerkUserInfos(
-    workspaceMembers.map((member) => member.userId),
-  );
-  const members: MemberOption[] = workspaceMembers.map((member) => {
-    const info = userInfos.get(member.userId);
-    return {
-      id: member.id,
-      name: info?.name ?? null,
-      email: info?.email ?? null,
-    };
-  });
+  // TODO: Replace with new auth system's user info lookup
+  const members: MemberOption[] = workspaceMembers.map((member) => ({
+    id: member.id,
+    name: null,
+    email: null,
+  }));
 
   return { clients, members };
 }

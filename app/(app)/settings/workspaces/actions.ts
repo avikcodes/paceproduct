@@ -1,10 +1,9 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUserId, ensurePaceUser } from "@/lib/auth";
 import {
-  ensureUserRecord,
   getWorkspaceMembership,
 } from "@/lib/permissions";
 import {
@@ -22,46 +21,42 @@ export async function createWorkspace(
   _prevState: WorkspaceActionState,
   formData: FormData,
 ): Promise<WorkspaceActionState> {
-  const { userId } = await auth();
-  if (!userId) {
-    return { error: "You must be signed in to create a workspace." };
-  }
+  const userId = await getAuthenticatedUserId();
+  await ensurePaceUser(userId);
 
-  const name = parseWorkspaceName(formData.get("workspaceName"));
-  const validated = validateWorkspaceName(name);
-  if ("error" in validated) {
-    return { error: validated.error };
-  }
+  const raw = formData.get("workspaceName");
+  const parsed = parseWorkspaceName(raw);
+  const result = validateWorkspaceName(parsed);
 
-  const result = await createWorkspaceForUser(userId, validated.name);
-  if (!result.ok) {
+  if ("error" in result) {
     return { error: result.error };
   }
 
-  revalidatePath("/", "layout");
+  const workspace = await createWorkspaceForUser(userId, result.name);
+  if (!workspace.ok) {
+    return { error: workspace.error };
+  }
+
+  revalidatePath("/");
   return { success: "Workspace created." };
 }
 
 export async function switchWorkspace(
   workspaceId: string,
 ): Promise<WorkspaceActionState> {
-  const { userId } = await auth();
-  if (!userId) {
-    return { error: "You must be signed in." };
-  }
+  const userId = await getAuthenticatedUserId();
 
   const membership = await getWorkspaceMembership(userId, workspaceId);
   if (!membership) {
-    return { error: "You don't have access to this workspace." };
+    return { error: "You are not a member of that workspace." };
   }
 
-  await ensureUserRecord(userId);
   await prisma.user.update({
     where: { id: userId },
     data: { activeWorkspaceId: workspaceId },
   });
 
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   return { success: "Workspace switched." };
 }
 
@@ -69,104 +64,62 @@ export async function renameWorkspace(
   _prevState: WorkspaceActionState,
   formData: FormData,
 ): Promise<WorkspaceActionState> {
-  const { userId } = await auth();
-  if (!userId) {
-    return { error: "You must be signed in." };
+  const userId = await getAuthenticatedUserId();
+
+  const raw = formData.get("workspaceName");
+  const parsed = parseWorkspaceName(raw);
+  const result = validateWorkspaceName(parsed);
+
+  if ("error" in result) {
+    return { error: result.error };
   }
 
-  const workspaceId =
-    typeof formData.get("workspaceId") === "string"
-      ? (formData.get("workspaceId") as string)
-      : "";
-
-  const membership = await requireOwnership(userId, workspaceId);
-  if ("error" in membership) {
-    return { error: membership.error };
-  }
-
-  const name = parseWorkspaceName(formData.get("workspaceName"));
-  const validated = validateWorkspaceName(name);
-  if ("error" in validated) {
-    return { error: validated.error };
+  const membership = await getWorkspaceMembership(userId, "");
+  if (!membership || membership.role !== "OWNER") {
+    return { error: "Only the workspace owner can rename it." };
   }
 
   await prisma.workspace.update({
-    where: { id: workspaceId },
-    data: { name: validated.name },
+    where: { id: membership.workspaceId },
+    data: { name: result.name },
   });
 
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   return { success: "Workspace renamed." };
 }
 
 export async function deleteWorkspace(
   workspaceId: string,
 ): Promise<WorkspaceActionState> {
-  const { userId } = await auth();
-  if (!userId) {
-    return { error: "You must be signed in." };
-  }
+  const userId = await getAuthenticatedUserId();
 
-  const membership = await requireOwnership(userId, workspaceId);
-  if ("error" in membership) {
-    return { error: membership.error };
+  const membership = await getWorkspaceMembership(userId, workspaceId);
+  if (!membership || membership.role !== "OWNER") {
+    return { error: "Only the workspace owner can delete it." };
   }
 
   await prisma.workspace.delete({ where: { id: workspaceId } });
-
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   return { success: "Workspace deleted." };
 }
 
 export async function leaveWorkspace(
   workspaceId: string,
 ): Promise<WorkspaceActionState> {
-  const { userId } = await auth();
-  if (!userId) {
-    return { error: "You must be signed in." };
-  }
+  const userId = await getAuthenticatedUserId();
 
   const membership = await getWorkspaceMembership(userId, workspaceId);
   if (!membership) {
-    return { error: "Workspace not found." };
+    return { error: "You are not a member of that workspace." };
   }
-
   if (membership.role === "OWNER") {
-    return {
-      error: "Owners can't leave their workspace. Delete it instead.",
-    };
+    return { error: "The owner cannot leave. Delete the workspace instead." };
   }
 
-  await prisma.$transaction([
-    prisma.workspaceMember.delete({
-      where: { workspaceId_userId: { workspaceId, userId } },
-    }),
-    prisma.user.updateMany({
-      where: { id: userId, activeWorkspaceId: workspaceId },
-      data: { activeWorkspaceId: null },
-    }),
-  ]);
+  await prisma.workspaceMember.delete({
+    where: { workspaceId_userId: { workspaceId, userId } },
+  });
 
-  revalidatePath("/", "layout");
+  revalidatePath("/");
   return { success: "You left the workspace." };
-}
-
-async function requireOwnership(
-  userId: string,
-  workspaceId: string,
-): Promise<{ workspaceId: string } | { error: string }> {
-  if (!workspaceId) {
-    return { error: "Workspace not found." };
-  }
-
-  const membership = await getWorkspaceMembership(userId, workspaceId);
-  if (!membership) {
-    return { error: "Workspace not found." };
-  }
-
-  if (membership.role !== "OWNER") {
-    return { error: "Only the workspace owner can do that." };
-  }
-
-  return { workspaceId };
 }

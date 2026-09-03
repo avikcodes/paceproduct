@@ -11,7 +11,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { requireCapability } from "@/lib/permissions";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -19,10 +18,8 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
-  await requireCapability("manageSettings");
   const user = await currentUser();
-  const email = user?.primaryEmailAddress?.emailAddress;
-  const createdAt = user?.createdAt;
+  const email = user?.emailAddresses?.[0]?.emailAddress ?? "user@example.com";
 
   return (
     <div className="flex flex-col gap-8">
@@ -46,8 +43,7 @@ export default async function SettingsPage() {
               Email address
             </CardTitle>
             <CardDescription>
-              Your sign-in email. To change it, manage your account in Clerk&apos;s
-              profile settings.
+              Your sign-in email.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -60,15 +56,6 @@ export default async function SettingsPage() {
                 Primary
               </Badge>
             </div>
-            {createdAt && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Member since{" "}
-                {new Intl.DateTimeFormat("en", {
-                  month: "long",
-                  year: "numeric",
-                }).format(createdAt)}
-              </p>
-            )}
           </CardContent>
         </Card>
 

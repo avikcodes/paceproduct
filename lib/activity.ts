@@ -2,7 +2,6 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { getReportableMonths } from "@/lib/reports";
-import { getClerkUserInfos } from "@/lib/clerk-users";
 import {
   alertSelect,
   toAlertRow,
@@ -320,17 +319,17 @@ export async function getActivityData(
     getScopeUsages(workspaceId),
   ]);
 
-  const userInfos = await getClerkUserInfos(members.map((member) => member.userId));
+  // TODO: Replace with new auth system's user info lookup
   const memberInfoMap = new Map(
     members.map((member) => [
       member.id,
-      userInfos.get(member.userId) ?? { name: null, email: null },
+      { name: null as string | null, email: null as string | null },
     ]),
   );
   const memberNameById = new Map(
     members.map((member) => [
       member.id,
-      memberInfoMap.get(member.id)?.name ?? "Team member",
+      "Team member",
     ]),
   );
   const clientNameById = new Map(clients.map((client) => [client.id, client.name]));

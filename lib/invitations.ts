@@ -1,7 +1,6 @@
 import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
-import { clerkClient } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import type { InvitationStatus, Role } from "@/lib/generated/prisma/enums";
 
@@ -52,56 +51,15 @@ export function isInvitationExpired(invitation: {
   return invitation.expiresAt.getTime() < Date.now();
 }
 
-export async function sendInvitationEmail(input: {
+export async function sendInvitationEmail(_input: {
   to: string;
   workspaceName: string;
   inviteLink: string;
   inviterName?: string | null;
   expiresAt: Date;
 }): Promise<void> {
-  const client = await clerkClient();
-  const days = Math.max(
-    1,
-    Math.ceil(
-      (input.expiresAt.getTime() - Date.now()) / 86_400_000,
-    ),
-  );
-  const fromName = process.env.MAIL_FROM_NAME ?? "Pace";
-
-  const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-      <h1 style="font-size: 20px; margin: 0 0 16px;">You've been invited to ${escapeHtml(input.workspaceName)}</h1>
-      <p style="color: #475569; line-height: 1.6; margin: 0 0 24px;">
-        ${input.inviterName ? escapeHtml(input.inviterName) + " invited you to" : "You've been invited to join"}
-        join the <strong>${escapeHtml(input.workspaceName)}</strong> workspace on Pace. Click the button below to accept your invitation.
-      </p>
-      <p style="margin: 0 0 24px;">
-        <a href="${escapeHtml(input.inviteLink)}" style="background-color: #111827; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; display: inline-block;">Accept invitation</a>
-      </p>
-      <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin: 0;">
-        This invitation expires in ${days} day${days === 1 ? "" : "s"}. If you have questions, reach out to the workspace owner.
-      </p>
-    </div>
-  `;
-
-  const text = [
-    `You've been invited to join ${input.workspaceName} on Pace.`,
-    ``,
-    `Accept your invitation here: ${input.inviteLink}`,
-    ``,
-    `This invitation expires in ${days} day${days === 1 ? "" : "s"}.`,
-  ].join("\n");
-
-  await client.emails.create({
-    to: { address: input.to },
-    from: {
-      address: process.env.MAIL_FROM_ADDRESS ?? "no-reply@pace.app",
-      name: fromName,
-    },
-    subject: `You've been invited to join ${input.workspaceName} on Pace`,
-    html,
-    text,
-  });
+  // TODO: Re-implement email sending without Clerk (e.g., using Resend, SendGrid, etc.)
+  console.warn("Email sending not implemented — Clerk email API removed.");
 }
 
 export async function createInvitation(input: {
@@ -267,19 +225,4 @@ export async function getInvitationByToken(
   };
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}
+

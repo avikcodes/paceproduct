@@ -1,13 +1,25 @@
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Topbar } from "@/components/dashboard/topbar";
+import { getAuthenticatedUserId, ensurePaceUser } from "@/lib/auth";
 import { getWorkspaceData } from "@/lib/permissions";
+import { redirect } from "next/navigation";
 
 export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { current: workspace, workspaces } = await getWorkspaceData();
+  const userId = await getAuthenticatedUserId();
+  await ensurePaceUser(userId);
+
+  const data = await getWorkspaceData(userId);
+
+  if (data.workspaces.length === 0) {
+    redirect("/onboarding");
+  }
+
+  const workspace = data.current;
+  const workspaces = data.workspaces;
 
   return (
     <div className="min-h-dvh bg-background">

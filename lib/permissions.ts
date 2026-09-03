@@ -1,6 +1,5 @@
 import "server-only";
 import { cache } from "react";
-import { auth } from "@clerk/nextjs/server";
 import { redirect, forbidden } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import {
@@ -8,6 +7,7 @@ import {
   type Capability,
 } from "@/lib/capabilities";
 import type { Role } from "@/lib/generated/prisma/enums";
+import { auth } from "@clerk/nextjs/server";
 
 export type { Capability };
 export {
@@ -34,6 +34,13 @@ type WorkspaceData = {
   current: WorkspaceContext;
   workspaces: WorkspaceSummary[];
 };
+
+async function resolveUserId(explicit?: string): Promise<string> {
+  if (explicit) return explicit;
+  const { userId } = await auth();
+  if (!userId) redirect("/sign-in");
+  return userId;
+}
 
 async function loadMemberships(userId: string): Promise<MembershipRow[]> {
   const memberships = await prisma.workspaceMember.findMany({
@@ -87,26 +94,27 @@ async function selectActiveMembership(
   return selected;
 }
 
-export const getWorkspaceData = cache(async (): Promise<WorkspaceData> => {
-  const { userId } = await auth.protect();
-  const memberships = await loadMemberships(userId);
+export const getWorkspaceData = cache(async (userId?: string): Promise<WorkspaceData> => {
+  const uid = await resolveUserId(userId);
+
+  const memberships = await loadMemberships(uid);
   if (memberships.length === 0) redirect("/onboarding");
 
-  const selected = await selectActiveMembership(userId, memberships);
+  const selected = await selectActiveMembership(uid, memberships);
   if (!selected) redirect("/onboarding");
 
   const current: WorkspaceContext = {
-    userId,
+    userId: uid,
     workspaceId: selected.workspaceId,
     workspaceName: selected.workspaceName,
     role: selected.role,
   };
 
   return {
-    userId,
+    userId: uid,
     current,
     workspaces: memberships.map((membership) => ({
-      userId,
+      userId: uid,
       workspaceId: membership.workspaceId,
       workspaceName: membership.workspaceName,
       role: membership.role,
@@ -118,14 +126,14 @@ export const getWorkspaceData = cache(async (): Promise<WorkspaceData> => {
 });
 
 export const getCurrentWorkspace = cache(
-  async (): Promise<WorkspaceContext> => {
-    const data = await getWorkspaceData();
+  async (userId?: string): Promise<WorkspaceContext> => {
+    const data = await getWorkspaceData(userId);
     return data.current;
   },
 );
 
-export const getWorkspaceList = cache(async (): Promise<WorkspaceSummary[]> => {
-  const data = await getWorkspaceData();
+export const getWorkspaceList = cache(async (userId?: string): Promise<WorkspaceSummary[]> => {
+  const data = await getWorkspaceData(userId);
   return data.workspaces;
 });
 
@@ -181,8 +189,8 @@ export async function ensureUserRecord(userId: string): Promise<void> {
 }
 
 export const requireCapability = cache(
-  async (capability: Capability): Promise<WorkspaceContext> => {
-    const workspace = await getCurrentWorkspace();
+  async (capability: Capability, userId?: string): Promise<WorkspaceContext> => {
+    const workspace = await getCurrentWorkspace(userId);
     if (!roleHasCapability(workspace.role, capability)) forbidden();
     return workspace;
   },
@@ -190,16 +198,16 @@ export const requireCapability = cache(
 
 export async function getWorkspaceIfHasCapability(
   capability: Capability,
+  userId?: string,
 ): Promise<WorkspaceContext | null> {
-  const { userId } = await auth();
-  if (!userId) return null;
-  const workspace = await getWorkspaceMember(userId);
+  const uid = await resolveUserId(userId);
+  const workspace = await getWorkspaceMember(uid);
   if (!workspace || !roleHasCapability(workspace.role, capability)) return null;
   return workspace;
 }
 
 export const requireWorkspaceOwner = cache(
-  async (): Promise<WorkspaceContext> => {
-    return requireCapability("manageTeam");
+  async (userId?: string): Promise<WorkspaceContext> => {
+    return requireCapability("manageTeam", userId);
   },
 );

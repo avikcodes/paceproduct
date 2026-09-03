@@ -1,6 +1,5 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import { getClerkUserInfos } from "@/lib/clerk-users";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import type { InsightDataset } from "@/lib/insights-analysis";
 import {
@@ -285,10 +284,7 @@ export async function getInsightsDataset(
     }),
   ]);
 
-  const userInfos = await getClerkUserInfos(
-    members.map((member) => member.userId),
-  );
-
+  // TODO: Replace with new auth system's user info lookup
   const currency =
     clients.find((client) => client.retainers.length > 0)?.retainers[0]
       ?.currency ?? members[0]?.currency ?? "USD";
@@ -312,16 +308,13 @@ export async function getInsightsDataset(
         endDate: retainer.endDate,
       })),
     })),
-    members: members.map((member) => {
-      const info = userInfos.get(member.userId) ?? { name: null };
-      return {
-        id: member.id,
-        name: info.name ?? "Unnamed member",
-        costRate: member.costRate.toNumber(),
-        billingRate: member.billingRate.toNumber(),
-        currency: member.currency,
-      };
-    }),
+    members: members.map((member) => ({
+      id: member.id,
+      name: "Unnamed member",
+      costRate: member.costRate.toNumber(),
+      billingRate: member.billingRate.toNumber(),
+      currency: member.currency,
+    })),
     entries: entries.map((entry) => ({
       id: entry.id,
       clientId: entry.clientId,

@@ -1,8 +1,7 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUserId, ensurePaceUser } from "@/lib/auth";
 import {
   createWorkspaceForUser,
   parseWorkspaceName,
@@ -17,30 +16,20 @@ export async function createWorkspace(
   _prevState: OnboardingState,
   formData: FormData,
 ): Promise<OnboardingState> {
-  const { userId } = await auth();
+  const userId = await getAuthenticatedUserId();
+  await ensurePaceUser(userId);
 
-  if (!userId) {
-    return { error: "You must be signed in to create a workspace." };
-  }
+  const raw = formData.get("workspaceName");
+  const parsed = parseWorkspaceName(raw);
+  const result = validateWorkspaceName(parsed);
 
-  const existing = await prisma.workspaceMember.findFirst({
-    where: { userId },
-    select: { id: true },
-  });
-
-  if (existing) {
-    redirect("/dashboard");
-  }
-
-  const name = parseWorkspaceName(formData.get("workspaceName"));
-  const validated = validateWorkspaceName(name);
-  if ("error" in validated) {
-    return { error: validated.error };
-  }
-
-  const result = await createWorkspaceForUser(userId, validated.name);
-  if (!result.ok) {
+  if ("error" in result) {
     return { error: result.error };
+  }
+
+  const workspace = await createWorkspaceForUser(userId, result.name);
+  if (!workspace.ok) {
+    return { error: workspace.error };
   }
 
   redirect("/dashboard");

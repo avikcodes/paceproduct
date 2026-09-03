@@ -1,6 +1,5 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getClerkUserInfos } from "@/lib/clerk-users";
 import { runCsvImport } from "@/lib/imports/import-runner";
 import { TEAM_IMPORT_SPEC } from "@/lib/imports/team";
 import { createInvitation } from "@/lib/invitations";
@@ -17,22 +16,12 @@ const PATHS = [
 ];
 
 async function loadRefs(workspaceId: string): Promise<ImportRefs> {
-  const [members, invitations] = await Promise.all([
-    prisma.workspaceMember.findMany({
-      where: { workspaceId },
-      select: { userId: true },
-    }),
-    prisma.workspaceInvitation.findMany({
-      where: { workspaceId, status: "PENDING" },
-      select: { email: true },
-    }),
-  ]);
+  const invitations = await prisma.workspaceInvitation.findMany({
+    where: { workspaceId, status: "PENDING" },
+    select: { email: true },
+  });
 
-  const infos = await getClerkUserInfos(members.map((member) => member.userId));
   const existingEmails = new Set<string>();
-  for (const info of infos.values()) {
-    if (info.email) existingEmails.add(info.email.toLowerCase());
-  }
   for (const invitation of invitations) {
     if (invitation.email) existingEmails.add(invitation.email.toLowerCase());
   }

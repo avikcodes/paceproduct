@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { auth } from "@clerk/nextjs/server";
 
 import { Logo } from "@/components/brand/logo";
 import { ButtonLink } from "@/components/ui/button-link";
@@ -11,9 +10,6 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { userId } = await auth();
-  const getStartedHref = userId ? "/dashboard" : "/sign-up";
-
   return (
     <main className="flex min-h-dvh items-center justify-center px-6">
       <div className="flex flex-col items-center gap-5 text-center">
@@ -25,7 +21,7 @@ export default async function Home() {
           <ButtonLink variant="outline" href="/sign-in" className="h-9 px-5">
             Sign in
           </ButtonLink>
-          <ButtonLink href={getStartedHref} className="h-9 px-5">
+          <ButtonLink href="/sign-up" className="h-9 px-5">
             Get Started
           </ButtonLink>
         </div>

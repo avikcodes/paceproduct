@@ -3,11 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import {
-  type WorkspaceContext,
+  getWorkspaceIfHasCapability,
 } from "@/lib/permissions";
-import { evaluateClientMarginAlert } from "@/lib/margin-alerts";
-import { evaluateClientBudgetAlert } from "@/lib/budget-alerts";
-import { evaluateClientScopeAlert } from "@/lib/scope-alerts";
 import {
   timeEntryFormSchema,
   timeEntrySelect,
@@ -40,11 +37,6 @@ function revalidateTimeActivity() {
   revalidatePath(DASHBOARD_PATH);
   revalidatePath(TIME_PATH);
   revalidatePath(ACTIVITY_PATH);
-}
-
-async function getMemberDisplay(userId: string): Promise<MemberDisplay> {
-  // TODO: Replace with new auth system's user info lookup
-  return { name: null, email: null };
 }
 
 function parseTimeEntryInput(
@@ -100,21 +92,122 @@ function toUpdateData(values: TimeEntryFormValues) {
 export async function createTimeEntry(
   values: TimeEntryFormValues,
 ): Promise<TimeEntryActionResult<TimeEntryRow>> {
-  // TODO: Get workspace from new auth system
-  return { ok: false, error: "Authentication is required to log time." };
+  const workspace = await getWorkspaceIfHasCapability("addTimeEntries");
+  if (!workspace) {
+    return { ok: false, error: "Authentication is required to log time." };
+  }
+
+  const parsed = parseTimeEntryInput(values);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+
+  const [client, member] = await Promise.all([
+    findScopedClient(parsed.data.clientId, workspace.workspaceId),
+    findScopedMember(parsed.data.memberId, workspace.workspaceId),
+  ]);
+
+  if (!client) {
+    return { ok: false, error: "Client not found in this workspace." };
+  }
+  if (!member) {
+    return { ok: false, error: "Team member not found in this workspace." };
+  }
+
+  try {
+    const entry = await prisma.timeEntry.create({
+      data: toCreateData(parsed.data, workspace.workspaceId),
+      select: timeEntrySelect,
+    });
+
+    revalidateTimeActivity();
+    revalidateClientMargins(client.id);
+
+    return {
+      ok: true,
+      data: toTimeEntryRow(entry, { name: member.userId, email: null }),
+    };
+  } catch {
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
 }
 
 export async function updateTimeEntry(
   entryId: string,
   values: TimeEntryFormValues,
 ): Promise<TimeEntryActionResult<TimeEntryRow>> {
-  // TODO: Get workspace from new auth system
-  return { ok: false, error: "Authentication is required to update time entries." };
+  const workspace = await getWorkspaceIfHasCapability("addTimeEntries");
+  if (!workspace) {
+    return { ok: false, error: "Authentication is required to update time entries." };
+  }
+
+  const parsed = parseTimeEntryInput(values);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+
+  const existing = await prisma.timeEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true, workspaceId: true, clientId: true },
+  });
+
+  if (!existing || existing.workspaceId !== workspace.workspaceId) {
+    return { ok: false, error: "Time entry not found." };
+  }
+
+  const [client, member] = await Promise.all([
+    findScopedClient(parsed.data.clientId, workspace.workspaceId),
+    findScopedMember(parsed.data.memberId, workspace.workspaceId),
+  ]);
+
+  if (!client) {
+    return { ok: false, error: "Client not found in this workspace." };
+  }
+  if (!member) {
+    return { ok: false, error: "Team member not found in this workspace." };
+  }
+
+  try {
+    const entry = await prisma.timeEntry.update({
+      where: { id: entryId },
+      data: toUpdateData(parsed.data),
+      select: timeEntrySelect,
+    });
+
+    revalidateTimeActivity();
+    revalidateClientMargins(client.id);
+    if (existing.clientId !== client.id) {
+      revalidateClientMargins(existing.clientId);
+    }
+
+    return {
+      ok: true,
+      data: toTimeEntryRow(entry, { name: member.userId, email: null }),
+    };
+  } catch {
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
 }
 
 export async function deleteTimeEntry(
   entryId: string,
 ): Promise<TimeEntryActionResult<{ id: string }>> {
-  // TODO: Get workspace from new auth system
-  return { ok: false, error: "Authentication is required to delete time entries." };
+  const workspace = await getWorkspaceIfHasCapability("addTimeEntries");
+  if (!workspace) {
+    return { ok: false, error: "Authentication is required to delete time entries." };
+  }
+
+  const existing = await prisma.timeEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true, workspaceId: true, clientId: true },
+  });
+
+  if (!existing || existing.workspaceId !== workspace.workspaceId) {
+    return { ok: false, error: "Time entry not found." };
+  }
+
+  try {
+    await prisma.timeEntry.delete({ where: { id: entryId } });
+    revalidateTimeActivity();
+    revalidateClientMargins(existing.clientId);
+    return { ok: true, data: { id: entryId } };
+  } catch {
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
 }

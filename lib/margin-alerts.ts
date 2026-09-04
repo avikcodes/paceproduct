@@ -42,6 +42,36 @@ export async function evaluateClientMarginAlert(
   workspaceId: string,
   db: PrismaClient = prisma,
 ): Promise<void> {
+  const client = await db.client.findFirst({
+    where: { id: clientId, workspaceId },
+    select: {
+      retainers: {
+        where: { isActive: true },
+        take: 1,
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!client || client.retainers.length === 0) {
+    const existing = await db.alert.findFirst({
+      where: {
+        workspaceId,
+        clientId,
+        type: ALERT_TYPE,
+        isResolved: false,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      await db.alert.update({
+        where: { id: existing.id },
+        data: { isResolved: true, resolvedAt: new Date() },
+      });
+    }
+    return;
+  }
+
   const margin = await getClientMargin(clientId, workspaceId, db);
 
   await db.$transaction(async (tx) => {

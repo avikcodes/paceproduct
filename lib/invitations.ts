@@ -150,7 +150,7 @@ export type InvitationLookup = {
   reason: string | null;
   invitation: {
     id: string;
-    email: string;
+    email: string | null;
     role: Role;
     workspaceId: string;
     workspaceName: string;
@@ -180,9 +180,6 @@ export async function getInvitationByToken(
   });
 
   if (!invitation) {
-    return { status: "PENDING", valid: false, reason: "invalid", invitation: null };
-  }
-  if (!invitation.email) {
     return { status: "PENDING", valid: false, reason: "invalid", invitation: null };
   }
   if (invitation.status === "ACCEPTED") {

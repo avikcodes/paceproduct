@@ -50,7 +50,7 @@ export default async function InvitePage({
         </div>
         <InviteAcceptCard
           token={token}
-          email={invitation.email}
+          email={invitation.email ?? null}
           roleLabel={invitation.role === "OWNER" ? "Owner" : "Member"}
           expiresAtLabel={
             invitation.expiresAt

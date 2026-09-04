@@ -7,6 +7,9 @@ import {
   type ImportRow,
 } from "@/lib/imports/types";
 import { normalizeHeader } from "@/lib/csv-core";
+import { evaluateAllMarginAlerts } from "@/lib/margin-alerts";
+import { evaluateAllBudgetAlerts } from "@/lib/budget-alerts";
+import { evaluateAllScopeAlerts } from "@/lib/scope-alerts";
 
 const PATHS = [
   "/dashboard",
@@ -90,5 +93,12 @@ export async function POST(request: Request) {
     dedupe,
     create,
     revalidate,
+    afterImport: async (workspaceId: string) => {
+      await Promise.all([
+        evaluateAllMarginAlerts(workspaceId),
+        evaluateAllBudgetAlerts(workspaceId),
+        evaluateAllScopeAlerts(workspaceId),
+      ]);
+    },
   });
 }

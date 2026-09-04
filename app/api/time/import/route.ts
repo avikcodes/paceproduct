@@ -28,6 +28,7 @@ import {
   type MemberOption,
   type TimeEntrySelectPayload,
 } from "@/lib/time";
+import { getWorkspaceIfHasCapability } from "@/lib/permissions";
 
 const encoder = new TextEncoder();
 
@@ -235,18 +236,244 @@ function toImportedEntry(
   };
 }
 
-export async function POST(request: Request) {
-  try {
-    // TODO: Get userId from new auth system
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  } catch (error) {
-    console.error(error);
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : null,
-      },
-      { status: 500 },
-    );
+const PATHS = [
+  "/dashboard",
+  "/dashboard/time",
+  "/dashboard/activity",
+];
+
+async function revalidate(): Promise<void> {
+  for (const path of PATHS) {
+    revalidatePath(path);
   }
+}
+
+export async function POST(request: Request) {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: { type: string; [key: string]: unknown }) =>
+        controller.enqueue(jsonLine(event));
+
+      try {
+        const workspace = await getWorkspaceIfHasCapability("addTimeEntries");
+        if (!workspace) {
+          send({ type: "error", message: "Unauthorized" });
+          return;
+        }
+
+        const formData = await request.formData();
+        const file = formData.get("file");
+        if (!(file instanceof File)) {
+          send({ type: "error", message: "No CSV file provided." });
+          return;
+        }
+
+        if (file.size > MAX_CSV_BYTES) {
+          send({
+            type: "error",
+            message: "File is too large. Maximum size is 5 MB.",
+          });
+          return;
+        }
+
+        const mappingRaw = formData.get("mapping");
+        const memberMappingRaw = formData.get("memberMapping");
+        const includeRaw = formData.get("include");
+        if (
+          typeof mappingRaw !== "string" ||
+          typeof memberMappingRaw !== "string" ||
+          typeof includeRaw !== "string"
+        ) {
+          send({
+            type: "error",
+            message: "Missing mapping, memberMapping, or include data.",
+          });
+          return;
+        }
+
+        const mapping = parseMapping(mappingRaw);
+        if (!mapping) {
+          send({ type: "error", message: "Invalid column mapping." });
+          return;
+        }
+
+        const allFieldsMapped = IMPORT_FIELDS.every(
+          (field) => mapping[field] !== null,
+        );
+        if (!allFieldsMapped) {
+          send({
+            type: "error",
+            message: "All fields must be mapped to a CSV column.",
+          });
+          return;
+        }
+
+        const memberMapping = parseMemberMapping(memberMappingRaw);
+        if (!memberMapping) {
+          send({ type: "error", message: "Invalid team member mapping." });
+          return;
+        }
+
+        const includeList = parseInclude(includeRaw);
+        if (!includeList) {
+          send({ type: "error", message: "Invalid include list." });
+          return;
+        }
+
+        const csvText = await file.text();
+        const parsed = parseCsv(csvText);
+        if (!parsed) {
+          send({
+            type: "error",
+            message:
+              "Could not parse the CSV file. Check the format and try again.",
+          });
+          return;
+        }
+
+        if (parsed.rows.length === 0) {
+          send({ type: "error", message: "The CSV file contains no data rows." });
+          return;
+        }
+
+        if (parsed.rows.length > MAX_CSV_ROWS) {
+          send({
+            type: "error",
+            message: `File exceeds the maximum of ${MAX_CSV_ROWS} rows.`,
+          });
+          return;
+        }
+
+        const refs = await loadRefs(workspace.workspaceId);
+        const rows = validateImportRows(parsed, mapping, refs, memberMapping);
+
+        const includeSet = new Set(includeList);
+        const rowsToImport = rows.filter(
+          (row) => isImportableRow(row) && includeSet.has(row.fingerprint),
+        );
+
+        const total = rowsToImport.length;
+        let imported = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        send({ type: "progress", imported, total, skipped, failed });
+
+        const existingKeys = await loadExistingKeys(
+          workspace.workspaceId,
+          rowsToImport,
+        );
+
+        const failures: ImportFailure[] = [];
+        for (const row of rowsToImport) {
+          if (!row.resolved) {
+            failed++;
+            failures.push({
+              rowNumber: row.rowNumber,
+              message: firstRowError(row) ?? "Row could not be resolved.",
+            });
+            continue;
+          }
+
+          const key = existingKey(row);
+          if (existingKeys.has(key)) {
+            skipped++;
+            failures.push({
+              rowNumber: row.rowNumber,
+              message:
+                "This time entry already exists for the same client, member, task, hours, and date.",
+            });
+            continue;
+          }
+
+          try {
+            const entry = await prisma.timeEntry.create({
+              data: {
+                workspaceId: workspace.workspaceId,
+                clientId: row.resolved.clientId,
+                memberId: row.resolved.memberId,
+                task: row.values.task,
+                hours: row.resolved.hours,
+                workDate: row.resolved.workDate,
+                source: "CSV",
+              },
+              select: timeEntrySelect,
+            });
+
+            const importedEntry = toImportedEntry(entry, refs);
+            send({ type: "entry", entry: importedEntry });
+            imported++;
+          } catch (error) {
+            failed++;
+            failures.push({
+              rowNumber: row.rowNumber,
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Something went wrong.",
+            });
+          }
+
+          if ((imported + failed) % 5 === 0 || imported + failed === total) {
+            send({ type: "progress", imported, total, skipped, failed });
+          }
+        }
+
+        await revalidate();
+
+        if (imported > 0) {
+          const clientIds = [
+            ...new Set(
+              rowsToImport
+                .filter((r) => r.resolved)
+                .map((r) => r.resolved!.clientId),
+            ),
+          ];
+          for (const clientId of clientIds) {
+            await evaluateAllMarginAlerts(clientId);
+            await evaluateAllBudgetAlerts(clientId);
+            await evaluateAllScopeAlerts(clientId);
+          }
+        }
+
+        send({
+          type: "done",
+          summary: {
+            totalRows: rows.length,
+            imported,
+            invalid: rows.length - rowsToImport.length,
+            duplicates: 0,
+            dbDuplicates: skipped,
+          },
+          failures,
+          entries: [],
+        });
+      } catch (error) {
+        try {
+          send({
+            type: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Something went wrong while importing. No rows were imported.",
+          });
+        } catch {
+          // Client disconnected.
+        }
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // Already closed.
+        }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
 }

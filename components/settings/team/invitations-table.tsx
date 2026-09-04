@@ -27,7 +27,7 @@ import {
 
 export type InvitationRow = {
   id: string;
-  email: string;
+  email: string | null;
   role: Role;
   status: InvitationStatus;
   createdAt: Date;
@@ -113,7 +113,7 @@ export function InvitationsTable({
                           <Mail className="size-4 text-muted-foreground" />
                         </div>
                         <span className="font-medium text-foreground">
-                          {invitation.email}
+                          {invitation.email ?? "Invite link"}
                         </span>
                       </div>
                     </TableCell>

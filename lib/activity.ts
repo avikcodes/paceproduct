@@ -33,6 +33,9 @@ import {
   type ActivityEventType,
   type TimelineFilters,
 } from "@/lib/activity-filters";
+import { evaluateAllMarginAlerts } from "@/lib/margin-alerts";
+import { evaluateAllBudgetAlerts } from "@/lib/budget-alerts";
+import { evaluateAllScopeAlerts } from "@/lib/scope-alerts";
 
 export type { ActivityEventType } from "@/lib/activity-filters";
 export {
@@ -202,6 +205,12 @@ export async function getActivityData(
   const since = resolveSinceFilter(filters.date);
   const hasClientFilter = filters.clientId !== "ALL";
   const hasSeverityFilter = filters.severity !== "ALL";
+
+  await Promise.all([
+    evaluateAllMarginAlerts(workspaceId),
+    evaluateAllBudgetAlerts(workspaceId),
+    evaluateAllScopeAlerts(workspaceId),
+  ]);
 
   const clientWhere = hasClientFilter ? { clientId: filters.clientId } : {};
   const fetchCap = Math.min(page * TIMELINE_PAGE_SIZE * 3, 1000);

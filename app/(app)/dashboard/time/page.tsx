@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
+import { requireCapability, roleHasCapability } from "@/lib/permissions";
 import {
   timeEntrySelect,
   toTimeEntryRow,
@@ -15,12 +16,44 @@ export const metadata: Metadata = {
 };
 
 export default async function TimePage() {
-  // TODO: Get workspace from new auth system
-  const rows: TimeEntryRow[] = [];
-  const clientOptions: ClientOption[] = [];
-  const memberOptions: MemberOption[] = [];
-  const currentMemberId = null;
-  const canEditAll = false;
+  const workspace = await requireCapability("addTimeEntries");
+  const canEditAll = roleHasCapability(workspace.role, "manageClients");
+
+  const [clientRows, memberRows, entryRows] = await Promise.all([
+    prisma.client.findMany({
+      where: { workspaceId: workspace.workspaceId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.workspaceMember.findMany({
+      where: { workspaceId: workspace.workspaceId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, userId: true },
+    }),
+    prisma.timeEntry.findMany({
+      where: { workspaceId: workspace.workspaceId },
+      orderBy: [{ workDate: "desc" }, { createdAt: "desc" }],
+      select: timeEntrySelect,
+    }),
+  ]);
+
+  const clientOptions: ClientOption[] = clientRows;
+  const memberOptions: MemberOption[] = memberRows.map((m) => ({
+    id: m.id,
+    name: null,
+    email: null,
+  }));
+
+  const memberDisplayMap = new Map(memberRows.map((m) => [m.id, m.userId]));
+  const rows: TimeEntryRow[] = entryRows.map((entry) =>
+    toTimeEntryRow(entry, {
+      name: memberDisplayMap.get(entry.memberId) ?? null,
+      email: null,
+    }),
+  );
+
+  const currentMember = memberRows.find((m) => m.userId === workspace.userId);
+  const currentMemberId = currentMember?.id ?? null;
 
   return (
     <div className="flex flex-col gap-6">

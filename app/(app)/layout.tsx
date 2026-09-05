@@ -1,5 +1,6 @@
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Topbar } from "@/components/dashboard/topbar";
+import { SubscriptionGuard } from "@/components/subscription-guard";
 import { getAuthenticatedUserId, ensurePaceUser } from "@/lib/auth";
 import { getWorkspaceData } from "@/lib/permissions";
 import { redirect } from "next/navigation";
@@ -40,7 +41,7 @@ export default async function AppLayout({
           id="main-content"
           className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
         >
-          {children}
+          <SubscriptionGuard>{children}</SubscriptionGuard>
         </main>
       </div>
     </div>

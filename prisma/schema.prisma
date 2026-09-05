@@ -70,6 +70,15 @@ enum AlertSeverity {
   CRITICAL
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  ON_HOLD
+  PAUSED
+  CANCELLED
+  FAILED
+  EXPIRED
+}
+
 model User {
   id                 String                @id
   activeWorkspace    Workspace?            @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
@@ -77,6 +86,7 @@ model User {
   memberships        WorkspaceMember[]
   invitedInvitations WorkspaceInvitation[] @relation("InvitationInvitedBy")
   acceptedInvitations WorkspaceInvitation[] @relation("InvitationAcceptedBy")
+  subscriptions       Subscription[]
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -345,4 +355,24 @@ model HarvestImport {
 
   @@index([workspaceId])
   @@index([workspaceId, createdAt])
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dodoCustomerId     String?
+  dodoSubscriptionId String?            @unique
+  dodoProductId      String
+  status             SubscriptionStatus
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([dodoCustomerId])
+  @@index([status])
 }

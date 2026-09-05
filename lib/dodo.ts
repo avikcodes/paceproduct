@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 
 const dodo = new DodoPayments({
   bearerToken: process.env.DODO_PAYMENTS_API_KEY!,
-  environment: "test_mode",
+  environment: (process.env.DODO_PAYMENTS_ENV as "live_mode" | "test_mode") ?? "live_mode",
 });
 
 export { dodo };
